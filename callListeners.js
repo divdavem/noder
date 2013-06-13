@@ -13,14 +13,5 @@
  * limitations under the License.
  */
 
-var Context = require('./context.js');
-var defaultConfig = require('../node-modules/defaultConfig.js');
-
-Context.expose('noder-js/promise.js', require('./promise.js'));
-Context.expose('noder-js/context.js', require('./context.js'));
-Context.expose('noder-js/findRequires.js', require('./findRequires.js'));
-Context.expose('noder-js/jsEval.js', require('./node-modules/jsEval.js'));
-Context.expose('noder-js/request.js', require('../node-modules/request.js'));
-Context.expose('noder-js/callListeners.js', require('./callListeners.js'));
-
-module.exports = Context.createContext(defaultConfig);
+// Shortcut to the corresponding file:
+module.exports = require('./src/modules/callListeners.js');

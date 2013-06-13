@@ -15,20 +15,43 @@
 
 var nextTick = require("../node-modules/nextTick.js");
 var uncaughtError = require("./uncaughtError.js");
+var handlers = [];
+var insideCallSync = false;
 
-module.exports = function(listeners, result) {
-    if (listeners && listeners.length) {
-        nextTick(function() {
-            for (var i = 0, l = listeners.length; i < l; i++) {
-                var curItem = listeners[i];
-                try {
-                    curItem.apply(null, result);
-                } catch (e) {
-                    uncaughtError(e);
-                }
-            }
-            listeners = null;
-            result = null;
+var callListeners = function(listeners, params, scope) {
+    while (listeners.length > 0) {
+        var method = listeners.shift();
+        try {
+            method.apply(scope, params);
+        } catch (e) {
+            uncaughtError(e);
+        }
+    }
+};
+
+var callSync = function() {
+    insideCallSync = true;
+    try {
+        callListeners(handlers, []);
+    } finally {
+        insideCallSync = false;
+    }
+};
+
+var improvedNextTick = function(fn) {
+    if (handlers.length === 0 && !insideCallSync) {
+        nextTick(callSync);
+    }
+    handlers.push(fn);
+};
+
+var asyncCallListeners = module.exports = function(listeners, params, scope) {
+    if (listeners && listeners.length > 0) {
+        improvedNextTick(function() {
+            callListeners(listeners, params, scope);
         });
     }
 };
+
+asyncCallListeners.nextTick = improvedNextTick;
+asyncCallListeners.callSync = callSync;
