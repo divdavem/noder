@@ -208,10 +208,50 @@ contextProto.moduleLoadDefinition = function(module) {
     return res;
 };
 
-contextProto.modulePreloadDependencies = function(module, modules) {
+contextProto.moduleProcessPlugin = function(module, pluginDef) {
+    var allowedParameters = {
+        "module": module,
+        "true": true,
+        "false": false,
+        "__dirname": module.dirname,
+        "__filename": module.filename
+    };
+    var parameters = pluginDef[1].slice(1);
+    for (var i = 0, l = parameters.length; i < l; i++) {
+        var curParameter = parameters[i];
+        if (typeUtils.isArray(curParameter)) {
+            curParameter = curParameter[0];
+            if (!allowedParameters.hasOwnProperty(curParameter)) {
+                return;
+            }
+            parameters[i] = allowedParameters[curParameter];
+        }
+    }
+    return this.moduleExecute(this.getModule(this.moduleResolve(module, pluginDef[0]))).then(function(plugin) {
+        var methodName = pluginDef[1][0];
+        var method = (plugin[methodName] || {}).$preload;
+        if (method) {
+            return method.apply(plugin, parameters);
+        }
+    }).then(null, function(error) {
+        throw noderError("moduleProcessPlugin", [module, pluginDef], error);
+    });
+};
+
+contextProto.modulePreloadDependencies = function(module, dependencies) {
     var promises = [];
-    for (var i = 0, l = modules.length; i < l; i++) {
-        promises.push(this.modulePreload(this.getModule(this.moduleResolve(module, modules[i])), module));
+    for (var i = 0, l = dependencies.length; i < l; i++) {
+        var curDependency = dependencies[i];
+        var curPromise = null;
+        if (typeUtils.isArray(curDependency)) {
+            curPromise = this.moduleProcessPlugin(module, curDependency);
+            curDependency = curDependency[0]; // in case curPromise is null, this is used to preload the module as usual
+        }
+        if (!curPromise) {
+            curPromise = this.modulePreload(this.getModule(this.moduleResolve(module, curDependency)), module);
+        }
+        promises.push(curPromise);
+
     }
     return promise.when(promises);
 };
@@ -293,7 +333,7 @@ contextProto.moduleAsyncRequire = function(module, id) {
 };
 
 contextProto.jsModuleDefine = function(jsCode, moduleFilename, url, lineDiff) {
-    var dependencies = findRequires(jsCode);
+    var dependencies = findRequires(jsCode, this.pluginRegExp);
     var body = this.jsModuleEval(jsCode, url || moduleFilename, lineDiff);
     return this.moduleDefine(this.getModule(moduleFilename), dependencies, body);
 };
@@ -326,6 +366,8 @@ contextProto.builtinModules = {
 };
 
 contextProto.Context = Context;
+
+contextProto.pluginRegExp = /\$[^\/]+$/;
 
 Context.createContext = function(cfg) {
     return (new Context(cfg)).rootModule;

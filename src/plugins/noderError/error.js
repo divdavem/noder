@@ -24,6 +24,10 @@ var errorsList = {
         out.unshift("failed to load definition of module '", module.filename, "'\n");
         return unshiftErrorInfo(this.cause, out);
     },
+    "moduleProcessPlugin": function(out, module, pluginDef) {
+        out.unshift("failed to process plugin require('", pluginDef[0], "')." + pluginDef[1][0] + " for module '", module.filename, "'\n");
+        return unshiftErrorInfo(this.cause, out);
+    },
     "modulePreload": function(out, module) {
         if (module.filename != '.') {
             out.unshift("failed to preload '", module.filename, "'\n");

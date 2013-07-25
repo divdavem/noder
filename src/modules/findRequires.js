@@ -20,6 +20,9 @@ var quoteRegExp = /^['"]$/;
 var operatorRegExp = /^[!%&\(*+,\-\/:;<=>?\[\^]$/;
 var firstNonSpaceCharRegExp = /^\s*(\S)/;
 var lastNonSpaceCharRegExp = /(\S)\s*$/;
+var pluginBeginRegExp = /\s*\)\s*\.\s*([_$a-zA-Z][_$a-zA-Z0-9]*)\s*\(\s*/g;
+var pluginParamRegExp = /[_$a-zA-Z][_$a-zA-Z0-9]*/g;
+var pluginParamSepRegExp = /\s*(\)|,)\s*/g;
 
 var isEscaped = function(string) {
     var escaped = false;
@@ -63,22 +66,17 @@ var findEndOfStringOrRegExp = function(array, i) {
     throw new Error("Unterminated string or regexp.");
 };
 
-var getStringContent = function(array, begin, end) {
-    // The string is supposed not to contain any special things such as: \n \r \t \' \"
-    return array.slice(begin, end).join('').substring(1);
-};
-
 var findEndOfSlashComment = function(array, beginIndex) {
     for (var i = beginIndex + 1, l = array.length; i < l; i++) {
         var curItem = array[i];
         var index = curItem.search(endOfLineRegExp);
         if (index > -1) {
             array[i] = curItem.substring(index);
-            array.splice(beginIndex, i - beginIndex);
-            return beginIndex;
+            break;
         }
     }
-    return i;
+    array.splice(beginIndex, i - beginIndex);
+    return beginIndex;
 };
 
 var findEndOfStarComment = function(array, beginIndex) {
@@ -91,18 +89,20 @@ var findEndOfStarComment = function(array, beginIndex) {
         var prevItem = curItem;
         curItem = array[i];
         if (prevItem.charAt(prevItem.length - 1) == '*' && curItem.charAt(0) == '/') {
-            array.splice(beginIndex, i - beginIndex);
-            array[beginIndex] = curItem.substring(1);
-            return beginIndex;
+            array[i] = curItem.substring(1);
+            break;
         }
     }
-    return i;
+    array.splice(beginIndex, i - beginIndex);
+    return beginIndex;
 };
 
-module.exports = function(source) {
-    var ids = [];
+var parseSource = function(source) {
+    var stringsPositions = [];
+    var requireStrings = [];
     var i = 0;
     var array = source.split(splitRegExp);
+    var l = array.length;
     /*
      * inRequireState variable:
      * 0 : outside of any useful require
@@ -112,10 +112,8 @@ module.exports = function(source) {
      * 4 : looking for closing parenthesis
      */
     var inRequireState = -1;
-    var inRequireBeginString;
-    var inRequireEndString;
 
-    for (var l = array.length; i < l && i >= 0; i++) {
+    for (; i < l && i >= 0; i++) {
         var curItem = array[i];
         var firstChar = curItem.charAt(0);
         if (firstChar == '/') {
@@ -130,11 +128,11 @@ module.exports = function(source) {
                 i = findEndOfStringOrRegExp(array, i);
             }
         } else if (quoteRegExp.test(firstChar)) {
-            inRequireBeginString = i;
+            var beginString = i;
             i = findEndOfStringOrRegExp(array, i);
+            stringsPositions.push([beginString, i]);
             if (inRequireState == 2) {
                 inRequireState = 3;
-                inRequireEndString = i;
             }
         } else if (firstChar == "r") {
             if (requireRegExp.test(curItem) && checkRequireScope(array, i)) {
@@ -152,13 +150,88 @@ module.exports = function(source) {
                 }
                 if (firstNonSpaceCharRegExp.test(curItem)) {
                     if (inRequireState == 4 && RegExp.$1 == ")") {
-                        ids.push(getStringContent(array, inRequireBeginString, inRequireEndString));
+                        // the last string is the parameter of require
+                        requireStrings.push(stringsPositions.length - 1);
                     }
                     inRequireState = 0;
                 }
             }
         }
     }
-    // Here, array.join('') should exactly contain the source but without comments.
-    return ids;
+    return {
+        chunks: array,
+        str: stringsPositions,
+        req: requireStrings
+    };
+};
+
+var createPositionsConverter = function(array) {
+    var positions = [0];
+    for (var i = 1, l = array.length; i <= l; i++) {
+        positions[i] = positions[i - 1] + array[i - 1].length;
+    }
+    return function(pos) {
+        return [positions[pos[0]] + 1, positions[pos[1]]];
+    };
+};
+
+var getString = function(source, position) {
+    // TODO: replace special chars: \n \t \\ ...
+    return source.substring.apply(source, position);
+};
+
+var regExpExecPosition = function(regExp, source, index) {
+    regExp.lastIndex = index;
+    var match = regExp.exec(source);
+    if (match && match.index == index) {
+        return match;
+    }
+};
+
+module.exports = function(source, isPlugin) {
+    var parseInfo = parseSource(source);
+    var requireStrings = parseInfo.req;
+    var requireStringsLength = requireStrings.length;
+    if (!requireStrings.length) {
+        return [];
+    }
+    var res = [];
+    var posConverter = createPositionsConverter(parseInfo.chunks);
+    var stripComment = parseInfo.chunks.join('');
+    var stringsPositions = parseInfo.str;
+    var nbStrings = stringsPositions.length;
+    for (var i = 0; i < requireStringsLength; i++) {
+        var strIndex = requireStrings[i];
+        var strPos = posConverter(stringsPositions[strIndex]);
+        var curItem = getString(stripComment, strPos);
+        if (isPlugin && isPlugin.test(curItem)) {
+            var match = regExpExecPosition(pluginBeginRegExp, stripComment, strPos[1] + 1);
+            if (match) {
+                var callInfos = [match[1]];
+                var nextString = ++strIndex < nbStrings && posConverter(stringsPositions[strIndex]);
+                do {
+                    var curPos = match.index + match[0].length;
+                    if (nextString && curPos + 1 === nextString[0]) {
+                        callInfos.push(getString(stripComment, nextString));
+                        curPos = nextString[1] + 1;
+                        nextString = ++strIndex < nbStrings && posConverter(stringsPositions[strIndex]);
+                    } else {
+                        match = regExpExecPosition(pluginParamRegExp, stripComment, curPos);
+                        if (!match) {
+                            break;
+                        }
+                        curPos = pluginParamRegExp.lastIndex;
+                        callInfos.push([match[0]]);
+                    }
+                    match = regExpExecPosition(pluginParamSepRegExp, stripComment, curPos);
+                } while (match && match[1] == ",");
+                if (match) {
+                    // this means the call is properly finished with a closing parenthesis
+                    curItem = [curItem, callInfos];
+                }
+            }
+        }
+        res.push(curItem);
+    }
+    return res;
 };
