@@ -19,7 +19,7 @@ var global = (function() {
 
 describe("Main", function() {
     var noder = global.noder || require('../../dist/node/noder.js');
-    var directory = global.window ? "/base/spec/browser" : __dirname;
+    var directory = global.window ? global.window.location.href.replace(/\/__attester__\/.*$/, "") : __dirname;
     var expect = global.chai ? global.chai.expect : require("chai").expect;
 
     var fail = function(done) {

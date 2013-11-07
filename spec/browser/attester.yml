@@ -1,0 +1,12 @@
+resources:
+ '/':
+  - 'dist/browser'
+  - 'spec/browser'
+tests:
+ mocha:
+  extraScripts:
+   - '/noder.js'
+  files:
+   includes:
+    - 'spec/browser/**/*.spec.js'
+  assertion: 'chai'

@@ -15,14 +15,11 @@
 
 module.exports = function(grunt) {
     var pkg = require('./package.json');
-    var config = pkg.config;
-    var env = process.env;
-    // The environment variable is defined when grunt is run from npm.
-    var testBrowsersCfg = env.npm_config_test_browsers || config['test-browsers'];
 
     var licenseLong = grunt.file.read('tasks/templates/LICENSE-long');
     var licenseSmall = grunt.file.read('tasks/templates/LICENSE-small');
     var acornPath = require.resolve('acorn/acorn.js');
+    var phantomjsInstances = "npm_package_config_phantomjsInstances" in process.env ? process.env.npm_package_config_phantomjsInstances || "0" : "1";
 
     var noderPackages = function(noderEnvironment) {
         return [{
@@ -106,34 +103,15 @@ module.exports = function(grunt) {
                 reporter: "spec"
             }
         },
+        attester: {
+            src: 'spec/browser/attester.yml',
+            options: {
+                "phantomjs-instances": phantomjsInstances
+            }
+        },
         watch: {
             files: '<%= jshint.sources %>',
             tasks: ['dev']
-        },
-        testacular_start: {
-            integration: {
-                configFile: './spec/browser/testacular.conf.js',
-                browsers: testBrowsersCfg.split(','),
-                singleRun: true
-            },
-            dev: {
-                configFile: './spec/browser/testacular.conf.js',
-                browsers: testBrowsersCfg.split(','),
-                singleRun: false,
-                dontWait: true
-            },
-            coverage: {
-                configFile: './spec/browser/testacular.conf.js',
-                browsers: testBrowsersCfg.split(','),
-                singleRun: true,
-                preprocessors: {
-                    '**/dist/browser/noder.js': 'coverage'
-                },
-                reporters: ['coverage']
-            }
-        },
-        testacular_run: {
-            run: {}
         },
         jsbeautifier: {
             update: {
@@ -158,10 +136,8 @@ module.exports = function(grunt) {
     grunt.loadNpmTasks("grunt-contrib-clean");
     grunt.registerTask('build', ['clean', 'atpackager', 'uglify', 'gzip']);
     // testacular_start without dontWait must always be the last task to run (it terminates the process)
-    grunt.registerTask('test', ['jsbeautifier:check', 'jshint', 'mocha', 'testacular_start:integration']);
-    grunt.registerTask('testacular', ['testacular_start:dev', 'dev', 'watch']);
+    grunt.registerTask('test', ['jsbeautifier:check', 'jshint', 'mocha', 'attester']);
     grunt.registerTask('beautify', ['jsbeautifier:update']);
-    grunt.registerTask('dev', ['beautify', 'build', 'jshint', 'testacular_run']);
-    grunt.registerTask('coverage', 'testacular_start:coverage');
+    grunt.registerTask('dev', ['beautify', 'build', 'jshint']);
     grunt.registerTask('default', ['build', 'test']);
 };

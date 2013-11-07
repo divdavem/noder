@@ -13,8 +13,6 @@
  * limitations under the License.
  */
 
-basePath = '../..';
-files = [MOCHA, MOCHA_ADAPTER, require.resolve('chai/chai.js'), 'spec/browser/injectNoder.js', 'spec/browser/*.spec.js', {
-    pattern: '**/*.js',
-    included: false
-}];
+module.exports = function(grunt) {
+    require('../helpers/execTask')(grunt, 'attester', require.resolve("attester/bin/attester"));
+};
