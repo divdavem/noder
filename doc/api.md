@@ -472,8 +472,92 @@ request("/api/", {
 });
 ```
 
-**Note: this page is still in construction, the following sections are planned to be added:**
+## Context
 
-* Loader plugins
-* Context
+A noderJS context is automatically created when noderJS is loaded. noderJS also provides an API to create new contexts.
+Each noderJS context has its own [configuration](configuration.md) and its own cache of modules.
 
+Inside the same context, when the same module is required twice, the corresponding module is in fact loaded only once and the
+reference is shared.
+
+However, if the same module is required from two different contexts, two different instances of the module will be loaded and
+will be independent from one another.
+
+It can be useful to create a new context when testing a module. The tested module can be put in a mocked environment by exposing
+mocks in the new context, so that the tested module will access mocks instead of the original modules when calling the usual
+`require` method.
+
+### Getting a context instance
+
+#### New context
+
+Here is how to create a new context:
+
+```js
+var Context = require("noder-js/context");
+var contextInstance = new Context({
+   /* context configuration */
+});
+```
+
+The context configuration object is described in the [configuration page](configuration.md).
+
+#### Current context
+
+Here is how to get a reference to the current context:
+
+```js
+var contextInstance = require("noder-js/currentContext");
+```
+
+### Context instance methods
+
+**contextInstance.expose(path: String, object: Object)**
+
+Exposes the given object at the given path. This means that, the next time a module with that path
+has to be loaded in the context, the usual loading method will be bypassed and the given object
+will be used as the export object.
+
+Note that this method does not unload any already loaded module at the given path. If a module with the
+given path is already loaded when this method is called, it is still accessible until it is deleted
+from the cache.
+
+For example:
+
+```js
+var myObject = {};
+contextInstance.expose("myModule.js", myObject);
+
+var myModule = contextInstance.require("myModule");
+delete contextInstance.require.cache["myModule.js"];
+var myReloadedModule = contextInstance.require("myModule");
+
+// Here, we always have:
+// myObject === myReloadedModule
+
+// We can also have:
+// myObject === myModule
+// but only if myModule.js was not loaded before the call to the expose method.
+```
+
+### Context instance properties
+
+**contextInstance.config**
+
+A reference to the configuration of the context.
+
+**contextInstance.cache**
+
+The same object as the one available in `require.cache` from modules loaded from this context.
+
+**contextInstance.builtinModules**
+
+An object containing all built-in modules (also including modules exposed through the `expose` method).
+
+**contextInstance.rootModule**
+
+A special module created when the context is created.
+
+## Loader plugins
+
+**Note: this page is still in construction, this section still has to be written**
