@@ -102,6 +102,61 @@ some modules asynchronously, even from code which was not loaded through noderJS
 noder.asyncRequire("myModule").spread(function (myModule){ /* ... */ }, function (error) { /* ... */ });
 ```
 
+## Loader plugins
+
+Before a module can be executed in noderJS, it has to be preloaded. The preload process consists in downloading the
+module file, parsing it to detect its static dependencies, and preloading those dependencies. The preload process is usually
+asynchronous, as it usually involves one or more XHR requests (which, by default, are configured to be asynchronous).
+
+noderJS provides the ability to add custom actions to the preload process, by implementing a loader plugin.
+This is especially useful to preload additional dependencies which cannot be automatically detected because they are
+not static. These include, for example, language-dependent resources or browser-dependent code.
+
+For example, let's consider our `sample.js` module which depends on a language-dependent resource.
+The code could look like the following example:
+
+```js
+var language = require("resourcesManager").language;
+var myResources = require("./myRes_"+language);
+// ...
+```
+
+When parsing this file, noderJS will find `resourcesManager` as a static dependency, but will be unable know the other file to preload
+as it depends on the `language` variable, whose value is unknown at the time the file is parsed (as it is not executed yet).
+As a result, when later executing this file, the second require will probably fail because the dependency will not have been preloaded
+and it will most likely not be possible to preload it synchronously (if XHR requests are configured to be asynchronous).
+
+To solve this kind of issues, or to execute any other custom actions asynchronously, support for loader plugins was implemented.
+The parser detects the pattern `require("loaderPluginPath/$loaderPluginName").methodName(arg1, arg2...)` in the file to be preloaded,
+and executes the loader plugin module at preloading time. It calls the `$preload` method on the `methodName` property of the object
+exported by the loader plugin and executes it with the parsed arguments (which must be either string literals or the special `__dirname`,
+`__filename` and `module` variable, or `null`). The `$preload` method can return a promise. If it is the case, the preload process will
+wait for the promise to be fulfilled before marking the module as preloaded.
+
+Now our `sample.js` module depending on a language-dependent resource can be re-written in the following way:
+
+```js
+var myResources = require("$resourcesLoader").getResource(__dirname, "./myRes");
+// ...
+```
+
+The loader plugin, called `$resourcesLoader.js` could look like this:
+
+```js
+var asyncRequire = require("noder-js/asyncRequire");
+var language = require("resourcesManager").language;
+exports.getResource = function(directory, resource) {
+   // this method is executed when sample.js is executed
+   // it is synchronous
+   return require(directory + "/" + resource);
+};
+exports.getResource.$preload = function(directory, resource) {
+   // this method is automatically executed when sample.js is preloaded
+   // it can be asynchronous by returning a promise
+   return asyncRequire(directory + "/" + resource);
+};
+```
+
 ## Promises library
 
 <a href="http://promisesaplus.com/">
@@ -190,7 +245,7 @@ var setTimeoutWithPromise = function (delay) {
 If `valueOrPromise` is a noder-js promise, `Promise.resolve` returns it directly.
 
 If `valueOrPromise` is an object or a function with a `thenSync` or `then`  method, it is considered as a promise and
-`Promise.resolve` returns an equivalent noder-js promise.
+`Promise.resolve` returns an equivalent noderJS promise.
 
 Otherwise, `Promise.resolve` returns an already fulfilled promise, whose fulfillment value is `valueOrPromise`.
 
@@ -330,10 +385,10 @@ Following the [Promises/A+ specifications](http://promises-aplus.github.io/promi
 calls its handlers synchronously. The same applies to the associated `spread`, `catch`, `finally` and `done` shortcuts.
 
 However, in some cases, it can be useful to avoid code duplication by handling both the asynchronous and the synchronous cases with
-the same code. For example, noder-js itself can be configured to use either synchronous or asynchronous XHR requests and uses the same
+the same code. For example, noderJS itself can be configured to use either synchronous or asynchronous XHR requests and uses the same
 code to handle both cases, without adding asynchronism uselessly.
 
-For this to be possible, noder-js provides the `thenSync`, `spreadSync`, `catchSync`, `finallySync` and `doneSync` methods which behave
+For this to be possible, noderJS provides the `thenSync`, `spreadSync`, `catchSync`, `finallySync` and `doneSync` methods which behave
 exactly as their `then`, `spread`, `catch`, `finally` and `done` counterparts, except that, in case the promise is already fulfilled or
 rejected at the time the `xSync` method is called, the corresponding handler is called synchronously.
 
@@ -558,6 +613,5 @@ An object containing all built-in modules (also including modules exposed throug
 
 A special module created when the context is created.
 
-## Loader plugins
+## findRequires parser
 
-**Note: this page is still in construction, this section still has to be written**
