@@ -275,6 +275,20 @@ var Promise = require("noder-js/promise");
 Promise.reject("error").catch(function (reason) { /* here, reason == "error" */ });
 ```
 
+### Promise.done
+
+**Promise.done : Promise**
+
+`Promise.done` is a reference to an already resolved promise, whose fulfillment value is `undefined`.
+
+It is defined by:
+
+```js
+Promise.done = Promise.resolve();
+```
+
+It can be used instead of `Promise.resolve(undefined)` to avoid creating a new promise instance.
+
 ### Promise.all() and Promise.allSettled()
 
 **Promise.all (promiseOrValueArray : Array) : Promise**
@@ -613,5 +627,104 @@ An object containing all built-in modules (also including modules exposed throug
 
 A special module created when the context is created.
 
+## asyncCall
+
+noder-js exposes an `asyncCall` module with some utility functions to call functions asynchronously or synchronously.
+
+```js
+var asyncCall = require("noder-js/asyncCall");
+```
+
+**asyncCall.nextTick(f : function())**
+
+Registers a function to be executed asynchronously.
+The function is called with no scope and no argument.
+Functions are executed in the same order as they are registered.
+
+The implementation of this function in the browser version of noderJS relies on `setTimeout`.
+To improve performance, multiple consecutive calls to `asyncCall.nextTick` in the same event loop turn lead to at most one call to `setTimeout`.
+Calling `async.nextTick` from a function called with `asyncCall.nextTick` simply adds the new function to the list of functions to be executed,
+without any call to `setTimeout`, and the function is executed at the end of the same event loop turn.
+
+**asyncCall.syncCall(f : function())**
+
+Executes the given function synchronously. In case an error happens in the callback, it is thrown again asynchronously, so that the caller
+of `asyncCall.syncCall` is not affected.
+
+This function has the same signature as `asyncCall.nextTick`. This way, it is possible to parameterize an algorithm with a reference to a callback
+executor, which can be set to be either `asyncCall.nextTick` to call callbacks asynchronously, or `asyncCall.syncCall` to call callbacks
+synchronously. This is done internally for the implementation of the `then` and `thenSync` promise methods.
+
+**asyncCall.nextTickCalls(arrayOfFunctions : Array)**
+
+Registers an array of functions to be executed later asynchronously. The functions are called in the order in which they appear in the array.
+
+Note that this function modifies the array: the first item of the array is removed, then the corresponding function is executed, then
+the new first item of the array is removed, ... until there is no remaining item in the array.
+Also note that, if the array is changed outside of `asyncCall.nextTickCalls` before the execution of all array items is finished, it has
+an impact on the functions which are actually executed.
+
+**asyncCall.syncCalls(arrayOfFunctions : Array)**
+
+Synchronous version of `asyncCall.nextTickCalls`. Executes each function in the array, in order, synchronously.
+
+**asyncCall.syncTick()**
+
+Executes synchronously all the functions currently planned to be executed asynchronously (and registered with `asyncCall.nextTick`).
+Note that this method should __never__ be called from application code.
+However, it can be useful to use it from tests to execute asynchronous code synchronously and improve performance for tests execution.
+
+```js
+var asyncCall = require("noder-js/asyncCall");
+var methodCalled = false;
+asyncCall.nextTick(function () {
+   methodCalled = true;
+});
+// here, methodCalled = false
+asyncCall.syncTick(); // this calls ALL the functions previously registered with asyncCall.nextTick and not yet executed
+// here, methodCalled = true
+```
+
 ## findRequires parser
 
+noderJS includes a small parser for JavaScript code which extracts calls to the `require` method. It is exposed as `noder-js/findRequires`:
+
+```js
+var findRequires = require("noder-js/findRequires");
+```
+
+**findRequires(jsCode : String, detectLoaderPlugins : Boolean)**
+
+* `jsCode`: JavaScript code to be parsed.
+* `detectLoaderPlugins`: whether to return information about loader plugins.
+
+`findRequires` returns an array. Each item in the array can be:
+* a string, which is the string literal used in a call to require.
+* (only if `detectLoaderPlugins` is `true`) an object with the `module` (string), `method` (string) and `args` (array) properties, corresponding
+to a call to a loader plugin.
+Note that for each loader plugin detected, a string entry is also present in the array in addition to the object. Each item in the args properties
+is either a string (corresponding to a string literal argument), or an array with a single string element (corresponding to a non-quoted argument
+like `module` or `null`).
+
+Each string corresponds to a call to require in the source code.
+
+```js
+var findRequires = require("noder-js/findRequires");
+
+findRequires("var myModule = require('myModule')"); // returns ["myModule"]
+findRequires("var myModule = require( /* comment1 */ 'myModule' /* 'comment2' */ )"); // returns ["myModule"]
+
+// The following 3 calls all return [] (an empty array)
+findRequires("var myModule = require('my' + 'Module')"); // expressions are not included
+findRequires("var myModule = module.require('myModule')"); // calls to module.require are not included
+findRequires("var myString = \"require('myModule')\""); // the content of string literals is not included
+
+// Loader plugins:
+findRequires("require('$loaderPlugin').myMethod('arg1', module)"); // returns ['$loaderPlugin']
+findRequires("require('$loaderPlugin').myMethod('arg1', module)", true);
+// The previous line returns:
+[ '$loaderPlugin',
+  { module: '$loaderPlugin',
+    method: 'myMethod',
+    args: [ 'arg1', ["module"] ] } ]
+```
