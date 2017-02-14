@@ -129,6 +129,7 @@ var Context = function(config) {
     this.loader = createInstance(config.Loader, Loader, this);
 
     rootModule.updatePackagesMap = bind(this.loader.updatePackagesMap, this.loader);
+    rootModule.updateDependenciesMap = bind(this.loader.updateDependenciesMap, this.loader);
 
     var globalVarName = config.varName;
     if (globalVarName) {
@@ -178,8 +179,19 @@ contextProto.modulePreload = function(module, parent) {
     }
     var self = this;
     setModuleProperty(module, PROPERTY_PRELOADING_PARENTS, parent ? [parent] : []);
+    var preloadDependenciesPromise;
+    var preloadDependencies = function() {
+        var dependencies = getModuleProperty(module, PROPERTY_DEPENDENCIES) || setModuleProperty(module, PROPERTY_DEPENDENCIES, self.loader.moduleGetDependencies(module));
+        if (dependencies) {
+            preloadDependenciesPromise = self.modulePreloadDependencies(module, dependencies);
+        }
+    };
+    preloadDependencies();
     return setModuleProperty(module, PROPERTY_PRELOADING, self.moduleLoadDefinition(module).thenSync(function() {
-        return self.modulePreloadDependencies(module, getModuleProperty(module, PROPERTY_DEPENDENCIES));
+        if (!preloadDependenciesPromise) {
+            preloadDependencies();
+        }
+        return preloadDependenciesPromise;
     }).thenSync(function() {
         module.preloaded = true;
         setModuleProperty(module, PROPERTY_PRELOADING_PARENTS, null);
@@ -245,10 +257,15 @@ contextProto.modulePreloadDependencies = function(module, dependencies) {
     var promises = [];
     for (var i = 0, l = dependencies.length; i < l; i++) {
         var curDependency = dependencies[i];
-        var curPromise = typeUtils.isString(curDependency) ?
-            this.modulePreload(this.getModule(this.moduleResolve(module, curDependency)), module) :
-            this.moduleProcessPlugin(module, curDependency);
-        promises.push(curPromise);
+        var curPromise = Promise.done;
+        if (typeUtils.isString(curDependency)) {
+            curPromise = this.modulePreload(this.getModule(this.moduleResolve(module, curDependency)), module);
+        } else {
+            curPromise = this.moduleProcessPlugin(module, curDependency);
+        }
+        if (curPromise !== Promise.done) {
+            promises.push(curPromise);
+        }
     }
     return this.allSettled(promises);
 };
@@ -298,10 +315,16 @@ contextProto.define = function(moduleFilename, dependencies, body) {
 };
 
 contextProto.moduleDefine = function(module, dependencies, body) {
+    // this function (and related ones) can be used:
+    // - either to set both the dependencies and the body of a module
+    // - or to only set the dependencies of a module without yet having its body
     if (!isModuleDefined(module)) {
         // do not override an existing definition
         setModuleProperty(module, PROPERTY_DEFINITION, body);
-        setModuleProperty(module, PROPERTY_DEPENDENCIES, dependencies);
+        if (!getModuleProperty(module, PROPERTY_DEPENDENCIES)) {
+            // do not override existing dependencies information (which may have already been used)
+            setModuleProperty(module, PROPERTY_DEPENDENCIES, dependencies);
+        }
     }
     return module;
 };
@@ -327,9 +350,13 @@ contextProto.moduleAsyncRequire = function(module, dependencies) {
 };
 
 contextProto.jsModuleDefine = function(jsCode, moduleFilename, url) {
-    var dependencies = findRequires(jsCode, true);
-    var body = this.jsModuleEval(jsCode, url || moduleFilename);
-    return this.moduleDefine(this.getModule(moduleFilename), dependencies, body);
+    var module = this.getModule(moduleFilename);
+    if (!isModuleDefined(module)) {
+        var dependencies = getModuleProperty(module, PROPERTY_DEPENDENCIES) || findRequires(jsCode, true);
+        var body = this.jsModuleEval(jsCode, url || moduleFilename);
+        this.moduleDefine(module, dependencies, body);
+    }
+    return module;
 };
 
 contextProto.jsModuleExecute = function(jsCode, moduleFilename, url) {

@@ -56,6 +56,13 @@ loaderProto.moduleLoad = function(module) {
     }
 };
 
+loaderProto.moduleGetDependencies = function(module) {
+    var dependenciesMap = this.config.dependenciesMap;
+    if (dependenciesMap) {
+        return dependenciesMap[module.filename];
+    }
+};
+
 loaderProto.loadUnpackaged = function(module) {
     module.url = this.baseUrl + module.filename;
     return request(module.url, this.config.requestConfig).thenSync(xhrContent).thenSync(bind1(this.preprocessUnpackaged, this, module));
@@ -98,13 +105,18 @@ loaderProto.jsPackageEval = function(jsCode, url) {
     return jsEval(jsCode, url, "(function(define){\n", "\n})");
 };
 
-loaderProto.updatePackagesMap = function(newMap) {
-    var config = this.config;
-    if (config.packagesMap) {
-        merge(config.packagesMap, newMap, true);
-    } else {
-        config.packagesMap = newMap;
-    }
+var updateMapFunction = function(mapName) {
+    return function(newMap) {
+        var config = this.config;
+        if (config[mapName]) {
+            merge(config[mapName], newMap, true);
+        } else {
+            config[mapName] = newMap;
+        }
+    };
 };
+
+loaderProto.updatePackagesMap = updateMapFunction("packagesMap");
+loaderProto.updateDependenciesMap = updateMapFunction("dependenciesMap");
 
 module.exports = Loader;
